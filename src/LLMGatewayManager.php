@@ -8,6 +8,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Support\Str;
 use Thaiduc96\LlmGateway\Contracts\LLMProvider;
 use Thaiduc96\LlmGateway\Contracts\ProviderRegistry;
+use Thaiduc96\LlmGateway\DTOs\GatewayConfig;
 use Thaiduc96\LlmGateway\DTOs\LLMResult;
 use Thaiduc96\LlmGateway\Events\LLMFailed;
 use Thaiduc96\LlmGateway\Events\LLMFallbackTriggered;
@@ -17,6 +18,7 @@ use Thaiduc96\LlmGateway\Exceptions\BadRequestException;
 use Thaiduc96\LlmGateway\Exceptions\LLMException;
 use Thaiduc96\LlmGateway\Exceptions\RateLimitedException;
 use Thaiduc96\LlmGateway\Infrastructure\CooldownManager;
+use Thaiduc96\LlmGateway\Infrastructure\ResponseCache;
 use Thaiduc96\LlmGateway\Infrastructure\RetryPolicy;
 
 final class LLMGatewayManager
@@ -25,15 +27,13 @@ final class LLMGatewayManager
     private ?string $runtimeFallback = null;
     private bool $fallbackExplicitlyDisabled = false;
 
-    /**
-     * @param  array<string, mixed>  $config  The full llm-gateway config array.
-     */
     public function __construct(
         private readonly ProviderRegistry $registry,
         private readonly CooldownManager $cooldownManager,
         private readonly RetryPolicy $retryPolicy,
         private readonly Dispatcher $events,
-        private readonly array $config,
+        private readonly GatewayConfig $config,
+        private readonly ResponseCache $responseCache,
     ) {}
 
     /**
@@ -78,18 +78,28 @@ final class LLMGatewayManager
         // H4: Validate messages
         $this->validateMessages($messages);
 
-        $primaryName = $this->runtimePrimary ?? $this->config['default']['primary'];
+        $primaryName = $this->runtimePrimary ?? $this->config->primaryProvider;
         $fallbackName = $this->resolveFallbackName();
         $mergedOptions = $this->mergeOptions($options);
         // M3: Auto-generate request_id if not provided
         $requestId = $options['request_id'] ?? (string) Str::uuid();
-        $fallbackOnList = $this->config['fallback_on'] ?? [];
+        $fallbackOnList = $this->config->fallbackOn;
+
+        // M5: Check response cache
+        $cacheModel = $mergedOptions['model'] ?? $this->defaultModelForProvider($primaryName);
+        $cached = $this->responseCache->get($primaryName, $cacheModel, $messages, $mergedOptions);
+        if ($cached !== null) {
+            return $cached;
+        }
 
         // Step: Check cooldown on primary
         if ($this->cooldownManager->isInCooldown($primaryName)) {
             // M2: Also check cooldown for fallback
             if ($fallbackName !== null && !$this->cooldownManager->isInCooldown($fallbackName)) {
-                return $this->callProvider($fallbackName, $messages, $mergedOptions, $requestId);
+                $result = $this->callProvider($fallbackName, $messages, $mergedOptions, $requestId);
+                $this->responseCache->put($primaryName, $cacheModel, $messages, $mergedOptions, $result);
+
+                return $result;
             }
             // No fallback available or fallback also in cooldown, try primary anyway
         }
@@ -122,6 +132,8 @@ final class LLMGatewayManager
                 usage: $result->usage,
                 requestId: $requestId,
             ));
+
+            $this->responseCache->put($primaryName, $cacheModel, $messages, $mergedOptions, $result);
 
             return $result;
         } catch (LLMException $primaryException) {
@@ -174,7 +186,10 @@ final class LLMGatewayManager
 
             // Attempt fallback
             try {
-                return $this->callProvider($fallbackName, $messages, $mergedOptions, $requestId);
+                $result = $this->callProvider($fallbackName, $messages, $mergedOptions, $requestId);
+                $this->responseCache->put($primaryName, $cacheModel, $messages, $mergedOptions, $result);
+
+                return $result;
             } catch (LLMException $fallbackException) {
                 $fallbackLatency = (hrtime(true) - $startTime) / 1_000_000;
 
@@ -210,10 +225,10 @@ final class LLMGatewayManager
     {
         $this->validateMessages($messages);
 
-        $primaryName = $this->runtimePrimary ?? $this->config['default']['primary'];
+        $primaryName = $this->runtimePrimary ?? $this->config->primaryProvider;
         $fallbackName = $this->resolveFallbackName();
         $mergedOptions = $this->mergeOptions($options);
-        $fallbackOnList = $this->config['fallback_on'] ?? [];
+        $fallbackOnList = $this->config->fallbackOn;
 
         $generator = null;
 
@@ -302,7 +317,7 @@ final class LLMGatewayManager
 
     private function resolveProvider(string $name): LLMProvider
     {
-        $providerConfig = $this->config['providers'][$name] ?? [];
+        $providerConfig = $this->config->providers[$name] ?? [];
 
         return $this->registry->resolve($name, $providerConfig);
     }
@@ -317,7 +332,7 @@ final class LLMGatewayManager
             return $this->runtimeFallback;
         }
 
-        return $this->config['default']['fallback'] ?? null;
+        return $this->config->fallbackProvider;
     }
 
     /**
@@ -326,7 +341,7 @@ final class LLMGatewayManager
      */
     private function mergeOptions(array $options): array
     {
-        $defaults = $this->config['defaults'] ?? [];
+        $defaults = $this->config->defaults;
 
         return array_merge([
             'temperature' => $defaults['temperature'] ?? 0.7,
@@ -351,7 +366,7 @@ final class LLMGatewayManager
      */
     private function defaultModelForProvider(string $providerName): string
     {
-        return $this->config['providers'][$providerName]['model'] ?? $providerName;
+        return $this->config->providers[$providerName]['model'] ?? $providerName;
     }
 
     /**

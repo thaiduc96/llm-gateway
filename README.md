@@ -118,8 +118,10 @@ All options are configurable in `config/llm-gateway.php`:
 | `timeout_seconds` | `30` | HTTP request timeout |
 | `connect_timeout_seconds` | `5` | HTTP connection timeout |
 | `retry_attempts` | `1` | Retry count (0–2 max) |
-| `retry_backoff_ms` | `200` | Backoff between retries |
+| `retry_backoff_ms` | `200` | Base backoff between retries (ms) |
+| `retry_max_backoff_ms` | `5000` | Max backoff cap for exponential backoff (ms) |
 | `retry_on_overloaded` | `false` | Whether to retry 503 errors |
+| `cache_ttl_seconds` | `0` | Response cache TTL (0 = disabled) |
 | `defaults.temperature` | `0.7` | Default temperature |
 | `defaults.max_output_tokens` | `1024` | Default max output tokens |
 
@@ -229,6 +231,25 @@ No changes to `LLMGatewayManager` required.
 7. On failure: fire `LLMFailed`
 8. If failure matches fallback rules: activate cooldown (if required), fire `LLMFallbackTriggered`, attempt fallback
 9. If fallback fails: fire `LLMFailed`, throw final exception
+
+## Response Caching
+
+Enable response caching by setting `cache_ttl_seconds` to a positive value:
+
+```env
+LLM_CACHE_TTL_SECONDS=300  # Cache responses for 5 minutes
+```
+
+The cache key is a SHA-256 hash of the provider, model, messages, and merged options. Identical requests within the TTL will return the cached response without calling the provider. Caching is disabled by default (`cache_ttl_seconds = 0`).
+
+## Security Considerations
+
+**Gemini API Key in URLs:** Google's Gemini API uses URL query-parameter authentication (`?key=...`). This means the API key may appear in HTTP access logs, proxy logs, or browser history. The gateway automatically sanitizes (redacts) the API key from all exception messages and stack traces to prevent accidental exposure in application logs.
+
+To further protect your Gemini API key:
+- Always use environment variables (`GEMINI_API_KEY`) — never commit keys to version control
+- Configure your web server and reverse proxy to avoid logging query strings
+- Use Google Cloud's API key restrictions to limit key usage by IP, referrer, or API
 
 ## Testing
 

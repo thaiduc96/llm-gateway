@@ -9,6 +9,7 @@ use Illuminate\Cache\Repository as CacheRepository;
 use Illuminate\Events\Dispatcher;
 use PHPUnit\Framework\TestCase;
 use Thaiduc96\LlmGateway\Contracts\LLMProvider;
+use Thaiduc96\LlmGateway\DTOs\GatewayConfig;
 use Thaiduc96\LlmGateway\DTOs\LLMResult;
 use Thaiduc96\LlmGateway\Events\LLMFailed;
 use Thaiduc96\LlmGateway\Events\LLMFallbackTriggered;
@@ -22,6 +23,7 @@ use Thaiduc96\LlmGateway\Exceptions\RateLimitedException;
 use Thaiduc96\LlmGateway\Exceptions\TimeoutException;
 use Thaiduc96\LlmGateway\Infrastructure\CooldownManager;
 use Thaiduc96\LlmGateway\Infrastructure\DefaultProviderRegistry;
+use Thaiduc96\LlmGateway\Infrastructure\ResponseCache;
 use Thaiduc96\LlmGateway\Infrastructure\RetryPolicy;
 use Thaiduc96\LlmGateway\LLMGatewayManager;
 
@@ -36,6 +38,7 @@ final class LLMGatewayManagerTest extends TestCase
         array $configOverrides = [],
         ?CooldownManager $cooldownManager = null,
         ?RetryPolicy $retryPolicy = null,
+        ?ResponseCache $responseCache = null,
     ): LLMGatewayManager {
         $registry = new DefaultProviderRegistry();
 
@@ -62,7 +65,7 @@ final class LLMGatewayManagerTest extends TestCase
             }
         });
 
-        $config = array_merge([
+        $configArray = array_merge([
             'default' => [
                 'primary' => $primary?->name() ?? 'openai',
                 'fallback' => $fallback?->name() ?? null,
@@ -73,6 +76,8 @@ final class LLMGatewayManagerTest extends TestCase
             'connect_timeout_seconds' => 5,
             'retry_attempts' => 0,
             'retry_backoff_ms' => 0,
+            'retry_max_backoff_ms' => 5000,
+            'cache_ttl_seconds' => 0,
             'defaults' => [
                 'temperature' => 0.7,
                 'max_output_tokens' => 1024,
@@ -83,7 +88,10 @@ final class LLMGatewayManagerTest extends TestCase
             ],
         ], $configOverrides);
 
-        return new LLMGatewayManager($registry, $cooldown, $retry, $events, $config);
+        $gwConfig = GatewayConfig::fromArray($configArray);
+        $respCache = $responseCache ?? new ResponseCache(new CacheRepository(new ArrayStore()), 0);
+
+        return new LLMGatewayManager($registry, $cooldown, $retry, $events, $gwConfig, $respCache);
     }
 
     private function successProvider(string $name, string $content = 'Hello'): LLMProvider
@@ -508,17 +516,25 @@ final class LLMGatewayManagerTest extends TestCase
         $registry = new DefaultProviderRegistry();
         $registry->register('openai', fn () => $primary);
 
+        $gwConfig = GatewayConfig::fromArray([
+            'default' => ['primary' => 'openai', 'fallback' => null],
+            'fallback_on' => ['timeout'],
+            'cooldown_seconds' => 60,
+            'timeout_seconds' => 30,
+            'connect_timeout_seconds' => 5,
+            'defaults' => ['temperature' => 0.7, 'max_output_tokens' => 1024],
+            'providers' => ['openai' => ['driver' => 'openai']],
+        ]);
+
+        $cacheRepo = new CacheRepository(new ArrayStore());
+
         $manager = new LLMGatewayManager(
             registry: $registry,
-            cooldownManager: new CooldownManager(new CacheRepository(new ArrayStore()), 60),
+            cooldownManager: new CooldownManager($cacheRepo, 60),
             retryPolicy: new RetryPolicy(0, 0),
             events: new Dispatcher(),
-            config: [
-                'default' => ['primary' => 'openai', 'fallback' => null],
-                'fallback_on' => ['timeout'],
-                'defaults' => ['temperature' => 0.7, 'max_output_tokens' => 1024],
-                'providers' => ['openai' => ['driver' => 'openai']],
-            ],
+            config: $gwConfig,
+            responseCache: new ResponseCache($cacheRepo, 0),
         );
 
         $this->expectException(TimeoutException::class);
@@ -751,6 +767,55 @@ final class LLMGatewayManagerTest extends TestCase
         $events = $this->eventsByType();
         $requested = $events[LLMRequested::class][0];
         $this->assertSame('my-custom-id', $requested->requestId);
+    }
+
+    // ===================================================================
+    // M5: Response caching
+    // ===================================================================
+
+    public function test_m5_cache_disabled_by_default(): void
+    {
+        $primary = $this->successProvider('openai');
+        $manager = $this->makeManager($primary);
+
+        // Call twice — should call provider both times (cache disabled)
+        $manager->chat($this->messages());
+        $manager->chat($this->messages());
+
+        $this->assertSame(2, $primary->callCount);
+    }
+
+    public function test_m5_cache_returns_cached_response(): void
+    {
+        $primary = $this->successProvider('openai', 'Cached response');
+        $cacheRepo = new CacheRepository(new ArrayStore());
+        $responseCache = new ResponseCache($cacheRepo, 300); // 5 min TTL
+
+        $manager = $this->makeManager($primary, responseCache: $responseCache);
+
+        // First call — provider is called
+        $result1 = $manager->chat($this->messages());
+        $this->assertSame('Cached response', $result1->content);
+        $this->assertSame(1, $primary->callCount);
+
+        // Second call with same messages — should return cached result
+        $result2 = $manager->chat($this->messages());
+        $this->assertSame('Cached response', $result2->content);
+        $this->assertSame(1, $primary->callCount); // Not called again
+    }
+
+    public function test_m5_cache_different_messages_not_cached(): void
+    {
+        $primary = $this->successProvider('openai');
+        $cacheRepo = new CacheRepository(new ArrayStore());
+        $responseCache = new ResponseCache($cacheRepo, 300);
+
+        $manager = $this->makeManager($primary, responseCache: $responseCache);
+
+        $manager->chat([['role' => 'user', 'content' => 'Hello']]);
+        $manager->chat([['role' => 'user', 'content' => 'Goodbye']]);
+
+        $this->assertSame(2, $primary->callCount);
     }
 
     // ===================================================================

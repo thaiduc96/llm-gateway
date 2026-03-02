@@ -145,4 +145,86 @@ final class RetryPolicyTest extends TestCase
             $this->assertSame(3, $callCount);
         }
     }
+
+    // ===================================================================
+    // H5: Exponential backoff with jitter
+    // ===================================================================
+
+    public function test_max_backoff_ms_getter(): void
+    {
+        $policy = new RetryPolicy(maxAttempts: 1, backoffMs: 100, maxBackoffMs: 2000);
+        $this->assertSame(2000, $policy->getMaxBackoffMs());
+    }
+
+    public function test_max_backoff_ms_bounded_to_5000(): void
+    {
+        $policy = new RetryPolicy(maxAttempts: 1, backoffMs: 100, maxBackoffMs: 99999);
+        $this->assertSame(5000, $policy->getMaxBackoffMs());
+    }
+
+    public function test_max_backoff_ms_at_least_base_backoff(): void
+    {
+        $policy = new RetryPolicy(maxAttempts: 1, backoffMs: 500, maxBackoffMs: 100);
+        $this->assertSame(500, $policy->getMaxBackoffMs());
+    }
+
+    public function test_calculate_backoff_ms_zero_when_base_is_zero(): void
+    {
+        $policy = new RetryPolicy(maxAttempts: 1, backoffMs: 0);
+        $this->assertSame(0, $policy->calculateBackoffMs(0));
+        $this->assertSame(0, $policy->calculateBackoffMs(1));
+    }
+
+    public function test_calculate_backoff_ms_exponential_growth(): void
+    {
+        $baseBackoff = 200;
+        $maxBackoff = 5000;
+        $policy = new RetryPolicy(maxAttempts: 2, backoffMs: $baseBackoff, maxBackoffMs: $maxBackoff);
+
+        // Attempt 0: min(5000, 200 * 2^0) + jitter = 200 + [0, 100]
+        $backoff0 = $policy->calculateBackoffMs(0);
+        $this->assertGreaterThanOrEqual(200, $backoff0);
+        $this->assertLessThanOrEqual(300, $backoff0); // 200 + max jitter(100)
+
+        // Attempt 1: min(5000, 200 * 2^1) + jitter = 400 + [0, 100]
+        $backoff1 = $policy->calculateBackoffMs(1);
+        $this->assertGreaterThanOrEqual(400, $backoff1);
+        $this->assertLessThanOrEqual(500, $backoff1); // 400 + max jitter(100)
+    }
+
+    public function test_calculate_backoff_ms_capped_at_max(): void
+    {
+        $policy = new RetryPolicy(maxAttempts: 2, backoffMs: 1000, maxBackoffMs: 2000);
+
+        // Attempt 2: min(2000, 1000 * 2^2) = min(2000, 4000) = 2000 + jitter [0, 500]
+        $backoff = $policy->calculateBackoffMs(2);
+        $this->assertGreaterThanOrEqual(2000, $backoff);
+        $this->assertLessThanOrEqual(2500, $backoff);
+    }
+
+    public function test_calculate_backoff_ms_includes_jitter(): void
+    {
+        $policy = new RetryPolicy(maxAttempts: 2, backoffMs: 200, maxBackoffMs: 5000);
+
+        // Run multiple times; jitter should cause variation
+        $values = [];
+        for ($i = 0; $i < 50; $i++) {
+            $values[] = $policy->calculateBackoffMs(0);
+        }
+
+        // All values should be in range [200, 300]
+        foreach ($values as $v) {
+            $this->assertGreaterThanOrEqual(200, $v);
+            $this->assertLessThanOrEqual(300, $v);
+        }
+
+        // With 50 samples, it's extremely unlikely all are the same (would mean no jitter)
+        $this->assertGreaterThan(1, count(array_unique($values)));
+    }
+
+    public function test_default_max_backoff_is_5000(): void
+    {
+        $policy = new RetryPolicy(maxAttempts: 1, backoffMs: 100);
+        $this->assertSame(5000, $policy->getMaxBackoffMs());
+    }
 }

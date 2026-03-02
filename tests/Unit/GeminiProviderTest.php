@@ -339,6 +339,70 @@ final class GeminiProviderTest extends TestCase
         }
     }
 
+    /**
+     * C1: API key should be sanitized from exception messages.
+     */
+    public function test_c1_connect_timeout_sanitizes_api_key(): void
+    {
+        $apiKey = 'AIzaSyAbcdef123456';
+        $handlerStack = HandlerStack::create(new MockHandler([
+            new ConnectException(
+                'cURL error 28: Connection timed out after 5ms for https://example.com/models/gemini:generateContent?key=' . $apiKey,
+                new Request('POST', '/'),
+            ),
+        ]));
+        $client = new Client(['handler' => $handlerStack]);
+
+        $provider = new GeminiProvider(
+            client: $client,
+            apiKey: $apiKey,
+            model: 'gemini-2.0-flash',
+            baseUrl: 'https://example.com/v1beta',
+            timeoutSeconds: 30.0,
+            connectTimeoutSeconds: 5.0,
+        );
+
+        try {
+            $provider->chat([['role' => 'user', 'content' => 'Hi']]);
+            $this->fail('Expected TimeoutException');
+        } catch (TimeoutException $e) {
+            // API key should NOT appear in exception message
+            $this->assertStringNotContainsString($apiKey, $e->getMessage());
+            $this->assertStringContainsString('[REDACTED]', $e->getMessage());
+        }
+    }
+
+    public function test_c1_http_error_sanitizes_api_key(): void
+    {
+        $apiKey = 'AIzaSyAbcdef123456';
+        $handlerStack = HandlerStack::create(new MockHandler([
+            new RequestException(
+                'Client error: POST https://example.com/models/gemini:generateContent?key=' . $apiKey . ' 429 Too Many Requests',
+                new Request('POST', '/'),
+                new Response(429, [], '{"error":{"message":"Rate limit"}}')
+            ),
+        ]));
+        $client = new Client(['handler' => $handlerStack]);
+
+        $provider = new GeminiProvider(
+            client: $client,
+            apiKey: $apiKey,
+            model: 'gemini-2.0-flash',
+            baseUrl: 'https://example.com/v1beta',
+            timeoutSeconds: 30.0,
+            connectTimeoutSeconds: 5.0,
+        );
+
+        try {
+            $provider->chat([['role' => 'user', 'content' => 'Hi']]);
+            $this->fail('Expected RateLimitedException');
+        } catch (RateLimitedException $e) {
+            // API key should NOT appear in exception message
+            $this->assertStringNotContainsString($apiKey, $e->getMessage());
+            $this->assertStringContainsString('[REDACTED]', $e->getMessage());
+        }
+    }
+
     public function test_429_without_retry_after_header(): void
     {
         $mock = new MockHandler([
