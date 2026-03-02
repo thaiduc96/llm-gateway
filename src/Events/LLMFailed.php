@@ -4,19 +4,19 @@ declare(strict_types=1);
 
 namespace Thaiduc96\LlmGateway\Events;
 
-final readonly class LLMFailed
+final class LLMFailed
 {
     /**
      * @param  array<string, mixed>  $options
      */
     public function __construct(
-        public string $provider,
-        public string $model,
-        public float $latencyMs,
-        public string $exceptionClass,
-        public int $exceptionCode,
-        public string $exceptionMessage,
-        public array $options = [],
-        public ?string $requestId = null,
+        public readonly string $provider,
+        public readonly string $model,
+        public readonly float $latencyMs,
+        public readonly string $exceptionClass,
+        public readonly int $exceptionCode,
+        public readonly string $exceptionMessage,
+        public readonly array $options = [],
+        public readonly ?string $requestId = null,
     ) {}
 }

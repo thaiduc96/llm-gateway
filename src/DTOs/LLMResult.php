@@ -4,18 +4,18 @@ declare(strict_types=1);
 
 namespace Thaiduc96\LlmGateway\DTOs;
 
-final readonly class LLMResult
+final class LLMResult
 {
     /**
      * @param  array{prompt_tokens?: int, completion_tokens?: int, total_tokens?: int}|null  $usage
      */
     public function __construct(
-        public string $content,
-        public string $provider,
-        public string $model,
-        public float $latencyMs,
-        public ?array $usage = null,
-        public ?string $finishReason = null,
+        public readonly string $content,
+        public readonly string $provider,
+        public readonly string $model,
+        public readonly float $latencyMs,
+        public readonly ?array $usage = null,
+        public readonly ?string $finishReason = null,
     ) {}
 
     /**

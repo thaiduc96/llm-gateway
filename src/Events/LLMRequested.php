@@ -4,15 +4,15 @@ declare(strict_types=1);
 
 namespace Thaiduc96\LlmGateway\Events;
 
-final readonly class LLMRequested
+final class LLMRequested
 {
     /**
      * @param  array<string, mixed>  $options
      */
     public function __construct(
-        public string $provider,
-        public string $model,
-        public array $options = [],
-        public ?string $requestId = null,
+        public readonly string $provider,
+        public readonly string $model,
+        public readonly array $options = [],
+        public readonly ?string $requestId = null,
     ) {}
 }

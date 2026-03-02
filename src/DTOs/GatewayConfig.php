@@ -9,7 +9,7 @@ use InvalidArgumentException;
 /**
  * Type-safe, immutable representation of the llm-gateway configuration.
  */
-final readonly class GatewayConfig
+final class GatewayConfig
 {
     /**
      * @param  list<string>  $fallbackOn
@@ -17,19 +17,19 @@ final readonly class GatewayConfig
      * @param  array<string, array<string, mixed>>  $providers
      */
     public function __construct(
-        public string $primaryProvider,
-        public ?string $fallbackProvider,
-        public array $fallbackOn,
-        public int $cooldownSeconds,
-        public float $timeoutSeconds,
-        public float $connectTimeoutSeconds,
-        public int $retryAttempts,
-        public int $retryBackoffMs,
-        public bool $retryOnOverloaded,
-        public int $retryMaxBackoffMs,
-        public array $defaults,
-        public array $providers,
-        public int $cacheTtlSeconds = 0,
+        public readonly string $primaryProvider,
+        public readonly ?string $fallbackProvider,
+        public readonly array $fallbackOn,
+        public readonly int $cooldownSeconds,
+        public readonly float $timeoutSeconds,
+        public readonly float $connectTimeoutSeconds,
+        public readonly int $retryAttempts,
+        public readonly int $retryBackoffMs,
+        public readonly bool $retryOnOverloaded,
+        public readonly int $retryMaxBackoffMs,
+        public readonly array $defaults,
+        public readonly array $providers,
+        public readonly int $cacheTtlSeconds = 0,
     ) {}
 
     /**

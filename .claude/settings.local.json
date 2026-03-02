@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(composer install:*)",
-      "Bash(./vendor/bin/phpunit:*)"
+      "Bash(./vendor/bin/phpunit:*)",
+      "Bash(xargs ls:*)"
     ]
   }
 }
