@@ -3,19 +3,21 @@
     "description": "Production-grade, provider-agnostic LLM gateway for Laravel with automatic fallback, circuit breaker, and retry policies.",
     "type": "library",
     "license": "MIT",
-    "keywords": ["laravel", "llm", "gateway", "openai", "gemini", "fallback", "circuit-breaker"],
+    "authors": [
+        {
+            "name": "thaiduc96"
+        }
+    ],
     "require": {
         "php": "^8.2",
-        "illuminate/support": "^10.0|^11.0",
-        "illuminate/contracts": "^10.0|^11.0",
-        "illuminate/cache": "^10.0|^11.0",
-        "illuminate/events": "^10.0|^11.0",
-        "guzzlehttp/guzzle": "^7.5"
+        "illuminate/support": "^11.0|^12.0",
+        "illuminate/contracts": "^11.0|^12.0",
+        "guzzlehttp/guzzle": "^7.0"
     },
     "require-dev": {
-        "orchestra/testbench": "^8.0|^9.0",
-        "phpstan/phpstan": "^2.0",
-        "phpunit/phpunit": "^10.0|^11.0"
+        "phpunit/phpunit": "^11.0",
+        "mockery/mockery": "^1.6",
+        "orchestra/testbench": "^9.0|^10.0"
     },
     "autoload": {
         "psr-4": {
@@ -27,23 +29,6 @@
             "Thaiduc96\\LlmGateway\\Tests\\": "tests/"
         }
     },
-    "extra": {
-        "laravel": {
-            "providers": [
-                "Thaiduc96\\LlmGateway\\LLMGatewayServiceProvider"
-            ],
-            "aliases": {
-                "LLM": "Thaiduc96\\LlmGateway\\Facades\\LLM"
-            }
-        }
-    },
-    "scripts": {
-        "test": "phpunit",
-        "phpstan": "phpstan analyse --no-progress"
-    },
-    "minimum-stability": "stable",
-    "prefer-stable": true,
-    "config": {
-        "sort-packages": true
-    }
+    "minimum-stability": "dev",
+    "prefer-stable": true
 }
